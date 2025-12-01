@@ -1,7 +1,7 @@
 # main.py
 import numpy as np
 
-from config import N_STEPS
+from config import DT, N_STEPS
 from data_gen import generate_target_trajectories, simulate_measurements
 from tracker_lmb import LMBTracker
 from metrics import compute_rmse, align_labels_to_truth, compute_ospa_over_time
@@ -31,6 +31,7 @@ def main():
 
     # --------- 3. 主循环 ----------
     for k in range(N_STEPS):
+        t = k * DT
         meas_k = measurements[k]
 
         if k == first_B_idx:
@@ -43,7 +44,7 @@ def main():
             continue   # 跳过本帧的 step，下一帧再开始正常 predict+update
 
         # 其他时刻：正常 predict + update
-        tracker.step(meas_k)
+        tracker.step(meas_k,t)
         est = tracker.get_current_estimates()
         est_series.append(est)
 

@@ -160,23 +160,17 @@ def main(save_gif: bool = True, gif_name: str = "result.gif"):
 
         # --- 跟踪器更新 ---
         if frame == 0:
-            # 用第一帧量测初始化两个目标
-            tracker.init_two_targets_from_measurements(meas_k)
+            # ✅ 只初始化一个目标（A），不要用 init_two_targets
+            tracker.init_one_target_from_measurements(meas_k)  # 你可以自己封装这个
 
         # 中途出现的 B（如果没 track 到，则强行加一个 Bernoulli）
         if frame > 10 and len(tracker.state.components) < 2:
-            if 19 <= t <= 25 and 'B' in current_truth_states:
-                is_tracked = False
-                for c in tracker.state.components:
-                    if np.linalg.norm(c.state.x[:2] - posB) < 3000.0:
-                        is_tracked = True
-                        break
-                if not is_tracked:
-                    tracker.add_target(posB + np.random.randn(2) * 50.0)
+            if 'B' in current_truth_states:
+                tracker.add_target(posB + np.random.randn(2) * 50.0)
 
         # 一步 LMB 递推
         if hasattr(tracker, 'step'):
-            tracker.step(meas_k)
+            tracker.step(meas_k,t)
         else:
             tracker.predict()
             tracker.update(meas_k)

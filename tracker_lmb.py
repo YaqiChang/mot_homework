@@ -8,7 +8,7 @@ from config import (
     SURVIVAL_PROB, BIRTH_PROB,
     EXISTENCE_THRESHOLD, POINT_EXT_THRESHOLD
 )
-from data_gen import Measurement
+from data_gen import Measurement, in_jam_region
 from models import (
     ExtendedTargetState, BernoulliComponent, LMBState
 )
@@ -137,6 +137,32 @@ class LMBTracker:
     #             state=ext_state
     #         )
     #         self.state.components.append(comp)
+    def init_one_target_from_measurements(self, meas_k):
+        """
+        用第 0 帧量测初始化一个 Bernoulli 目标（A）。
+        逻辑：取所有非杂波量测的质心作为初始位置，速度设 0。
+        """
+        # 只用非杂波量测
+        non_clutter = [m for m in meas_k if not m.is_clutter]
+        if len(non_clutter) == 0:
+            return
+
+        # 量测点坐标
+        zs = np.array([m.z for m in non_clutter], dtype=float)
+        pos0 = zs.mean(axis=0)              # 初始位置：点云质心
+
+        # 用你已有的扩展状态初始化接口
+        ext_state = ExtendedTargetState.init_from_position(pos0)
+
+        # 建一个 BernoulliComponent
+        comp = BernoulliComponent(
+            label=self._new_label(),
+            r=0.9,
+            state=ext_state
+        )
+        self.state.components.append(comp)
+        self.initialized = True
+
 
     def _new_label(self) -> int:
         lab = self.next_label_id
@@ -149,9 +175,9 @@ class LMBTracker:
         """对所有 Bernoulli 做预测，并衰减存在概率"""
         for comp in self.state.components:
             comp.state.predict()
-            comp.r *= SURVIVAL_PROB
+            # comp.r *= SURVIVAL_PROB
 
-    def update(self, meas_k: List[Measurement]):
+    def update(self, meas_k: List[Measurement], t: float):
         """
         简化更新：
         1. 收集所有非杂波量测；
@@ -228,9 +254,21 @@ class LMBTracker:
         # 3) 对每个组件做更新
         for idx, comp in enumerate(self.state.components):
             Z = np.array(assigned_measurements[idx]) if len(assigned_measurements[idx]) > 0 else None
+            # 预测位置，用于判断是不是在干扰区
+            pos_pred = comp.state.x[:2]
             if Z is None:
-                # 没有量测分配，存在概率略衰减
-                comp.r *= 0.9
+             # ====== 关键改动：区分“干扰导致的看不见” vs “普通漏检” ======
+                # if in_jam_region(pos_pred, t):
+                #     # 在干扰区且当前处于干扰时间：认为目标还在，只是被压制看不见
+                #     # 可以选择完全不衰减 r，或者只乘生存概率略微衰减
+                #     # 先保守一点：不动 r
+                #     pass
+                #     # 如果你想稍微衰减一点，可以改成：
+                #     # comp.r *= 0.995
+                # else:
+                #     # 正常漏检，再稍微衰减 r（比原来 0.99 更温和一点也可以）
+                #     comp.r *= 0.98
+                pass
             else:
                 # 判断是点量测还是扩展量测：根据点数量粗判
                 if Z.shape[0] == 1:
@@ -238,7 +276,7 @@ class LMBTracker:
                 else:
                     comp.state.update_with_extended(Z, self.R_meas)
                 # 有量测支撑，存在概率向上拉
-                comp.r = min(0.99, comp.r + 0.1)
+                comp.r = min(0.99, comp.r + 0.05)
 
         # 4) 不再对未分配量测触发新生（目标数已知为 2）
         # for z in unassigned_measurements:
@@ -249,9 +287,12 @@ class LMBTracker:
 
     def _prune_components(self):
     # 只删掉存在概率极低的组件，避免误删 A/B
-        self.state.components = [
-            c for c in self.state.components if c.r > 0.01
-        ]
+        # self.state.components = [
+        #     c for c in self.state.components if c.r > 0.01
+        # ]
+        if len(self.state.components) > 2:
+            self.state.components.sort(key=lambda c: c.r, reverse=True)
+            self.state.components = self.state.components[:2]
         # 如果仍然超过2个（极端情况下），保留存在概率最高的两个
         if len(self.state.components) > 2:
             self.state.components.sort(key=lambda c: c.r, reverse=True)
@@ -259,22 +300,23 @@ class LMBTracker:
 
     # ---------- 上层接口 ----------
 
-    def step(self, meas_k):
+    def step(self, meas_k, t:float):
         """
         单步：对已有目标做预测+更新。
         （注意：A/B 的添加由外部 main 控制，不在这里自动出生）
         """
         # 如果当前还没有任何目标（极端情况），直接返回
-        if len(self.state.components) == 0:
+        if not self.initialized:
+            self.init_tracks(meas_k)
             return
 
         self.predict()
-        self.update(meas_k)
+        self.update(meas_k,t)
 
     def get_current_estimates(self) -> Dict[Any, np.ndarray]:
         """返回当前时刻各 track 的位置估计（只返回存在概率足够高的）"""
         est = {}
         for comp in self.state.components:
-            if comp.r >= EXISTENCE_THRESHOLD:
+            # if comp.r >= EXISTENCE_THRESHOLD:
                 est[comp.label] = comp.state.x[:2].copy()
         return est
