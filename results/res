@@ -1,0 +1,12 @@
+RMSE A (position): 46.47 m
+RMSE B (position): 31.07 m
+Label 对真值目标的匹配关系: {0: 'A', 1: 'B'}
+RMSE A (position): 50.90 m
+RMSE B (position): 27.61 m
+Mean |cardinality error|: 0.00
+Cardinality bias (est - true): -0.00
+Detection recall A: 99.67%
+Detection recall B: 100.00%
+Mean OSPA distance: 27.73 m
+Confusion matrix (rows: True A/B; cols: Pred A/B/None):
+[[299   0   1]

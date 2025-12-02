@@ -3,7 +3,7 @@ import numpy as np
 
 # --------- 时间与步长 ----------
 DT = 1.0                # 采样周期 (s)
-TOTAL_TIME = 200.0      # 总仿真时长 (s)
+TOTAL_TIME = 300.0      # 总仿真时长 (s，原为 200)
 N_STEPS = int(TOTAL_TIME / DT)
 
 # --------- 单位转换 ----------
@@ -66,11 +66,14 @@ CLUTTER_REGION_Y = (-60 * KM, 60 * KM)
 CLUTTER_INTENSITY = 0.05 / (KM * KM)
 
 # --------- LMB 参数 ----------
-SURVIVAL_PROB = 0.99      # 生存概率
-BIRTH_PROB = 0.0        # 出生概率，避免疯狂出生
-EXISTENCE_THRESHOLD = 0.5 # track 有效存在概率阈值
-GATING_THRESHOLD =500   # 简单欧氏距离 gating 阈值（单位 m，示意）
+SURVIVAL_PROB = 0.995      # 生存概率（略微提高，轨迹不易被“判死”）
+BIRTH_PROB = 0.0           # 出生概率，避免疯狂出生
+# 为了让 B 在首次出现时更容易被计入“存在目标”，
+# 进一步降低存在概率阈值（原为 0.5 → 0.4）
+EXISTENCE_THRESHOLD = 0.3  # track 有效存在概率阈值
+GATING_THRESHOLD = 500     # 简单欧氏距离 gating 阈值（单位 m，示意）
 
 
 # 用于多目标扩展量测分配的“相对距离裕度”
-ASSIGN_DIST_MARGIN = 50.0  # m，可按场景调节，比如 50~150
+# 稍微收紧，减少“一次量测同时给 A/B” 的歧义情况
+ASSIGN_DIST_MARGIN = 30.0  # m，可按场景调节，比如 30~100
