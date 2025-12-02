@@ -23,15 +23,27 @@ def plot_trajectories(
 
     # 真值
     ax.plot(trajA_true[:, 0], trajA_true[:, 1], 'b-', label="True A")
-    ax.plot(trajB_true[:, 0], trajB_true[:, 1], 'r-', label="True B")
+    ax.plot(trajB_true[:, 0], trajB_true[:, 1], color='purple', linestyle='-', label="True B")
 
-    # 估计（A 用不同颜色，避免和 True A 混在一起）
+    # 估计（A/B 用点线，区别于真值实线）
     if estA is not None:
         maskA = ~np.isnan(estA[:, 0])
-        ax.plot(estA[maskA, 0], estA[maskA, 1], linestyle='--', color='orange', label="Est A")
+        ax.plot(
+            estA[maskA, 0],
+            estA[maskA, 1],
+            linestyle=':',
+            color='orange',
+            label="Est A",
+        )
     if estB is not None:
         maskB = ~np.isnan(estB[:, 0])
-        ax.plot(estB[maskB, 0], estB[maskB, 1], 'r--', label="Est B")
+        ax.plot(
+            estB[maskB, 0],
+            estB[maskB, 1],
+            linestyle=':',
+            color='red',
+            label="Est B",
+        )
 
     ax.set_xlabel("x [m]")
     ax.set_ylabel("y [m]")
@@ -191,15 +203,16 @@ def plot_measurements_snapshot(
                 label=f"Radar {rid} (clutter)",
             )
 
-    # 叠加真值/估计（如果给）
+    # 叠加真值/估计（如果给），颜色与主轨迹图保持一致：
+    # True A: 蓝色，True B: 紫色，Est A: 橙色，Est B: 红色
     if trueA is not None and not np.isnan(trueA[0]):
-        ax.plot(trueA[0], trueA[1], 'bx', markersize=10, label="True A")
+        ax.plot(trueA[0], trueA[1], marker='x', color='blue', markersize=10, linestyle='None', label="True A")
     if trueB is not None and not np.isnan(trueB[0]):
-        ax.plot(trueB[0], trueB[1], 'rx', markersize=10, label="True B")
+        ax.plot(trueB[0], trueB[1], marker='x', color='purple', markersize=10, linestyle='None', label="True B")
     if estA is not None and not np.isnan(estA[0]):
-        ax.plot(estA[0], estA[1], 'b+', markersize=10, label="Est A")
+        ax.plot(estA[0], estA[1], marker='+', color='orange', markersize=10, linestyle='None', label="Est A")
     if estB is not None and not np.isnan(estB[0]):
-        ax.plot(estB[0], estB[1], 'r+', markersize=10, label="Est B")
+        ax.plot(estB[0], estB[1], marker='+', color='red', markersize=10, linestyle='None', label="Est B")
 
     ax.set_xlabel("x [m]")
     ax.set_ylabel("y [m]")

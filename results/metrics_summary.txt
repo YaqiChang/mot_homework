@@ -1,37 +1,16 @@
 Tracking metrics summary
 ------------------------
-RMSE A (position): 51.2085 m
-RMSE B (position): 28.9140 m
-Mean |cardinality error|: 0.0033
-Cardinality bias (est - true): -0.0033
-Detection recall A: 99.6667%
+RMSE A (position): 51.0103 m
+RMSE B (position): 31.3548 m
+Mean |cardinality error|: 0.0100
+Cardinality bias (est - true): -0.0100
+Detection recall A: 99.0000%
 Detection recall B: 100.0000%
-Mean OSPA distance: 26.2849 m
+Mean OSPA distance: 33.8627 m
 Confusion matrix (rows: True A/B; cols: Pred A/B/None):
-[299   0   1]
+[297   0   3]
 [  0 280   0]
 A_as_B: 0, B_as_A: 0
-A_missed: 1, B_missed: 0
+A_missed: 3, B_missed: 0
 False targets total (unmatched tracks): 0
 False targets inside jamming area: 0
-
-
-
-CN 
-Label 对真值目标的匹配关系: {0: 'A', 1: 'B'}
-RMSE A (position): 51.21 m
-RMSE B (position): 28.91 m
-Mean |cardinality error|: 0.00
-Cardinality bias (est - true): -0.00
-Detection recall A: 99.67%
-Detection recall B: 100.00%
-Mean OSPA distance: 26.28 m
-Confusion matrix (rows: True A/B; cols: Pred A/B/None):
-[[299   0   1]
- [  0 280   0]]
-A 被误认为 B 的帧数: 0
-B 被误认为 A 的帧数: 0
-A 漏检帧数: 1
-B 漏检帧数: 0
-假目标（未匹配任何真值）的总次数: 0
-其中位于干扰区内的假警次数: 0
