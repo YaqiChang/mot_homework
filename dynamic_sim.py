@@ -134,7 +134,8 @@ def main(save_gif: bool = True, gif_name: str = "result.gif"):
     # 3. 绘图框架
     # 稍微加大画布，便于在动图中看清各类元素
     fig = plt.figure(figsize=(20, 10), facecolor="#ffffff")  # 底色
-    gs = gridspec.GridSpec(4, 3, figure=fig)
+    # 调大纵向间距，避免右侧三个指标子图上下太近
+    gs = gridspec.GridSpec(4, 3, figure=fig, hspace=0.6)
 
     # --- 左侧：场景 ---
     ax_sim = fig.add_subplot(gs[:, :2])
