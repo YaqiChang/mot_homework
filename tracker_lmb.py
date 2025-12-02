@@ -22,301 +22,184 @@ class TrackEstimate:
     label: Any
     positions: List[np.ndarray]   # 每步 [px, py]
 
+
 class LMBTracker:
     """
-    简化 LMB 扩展目标跟踪器：
-    - 不做完整的多假设，只做“每个 Bernoulli 对应一个轨迹”；
-    - 数据关联用简单 gating + 最近邻；
-    - 重点是结构清晰，方便课程作业说明。
+    简化 LMB 扩展目标跟踪器（回到作业原始结构，在其基础上只做轻微改动）：
+    - 候选轨迹由外部（main / dynamic_sim）显式添加（A、B），内部不再从杂波新生目标；
+    - r 的上 / 下调节逻辑基本沿用原始版本，只额外区分“干扰区漏检”和“普通漏检”；
+    - 这样可以保证：
+        * B 在真值第一次出现时就能被加入并快速被检测到（r 初始较高）；
+        * 0–200 s 内内部 ID 只分配一次，不会不断自增。
+    该存在概率管理思想参考了标准多目标跟踪 / LMB 文献中常见的
+    “存在概率 r + track management（多次连续命中 / 多次连续漏检）”做法。
     """
+
     def __init__(self):
         self.state = LMBState(components=[])
         self.next_label_id = 0
-        # 观测噪声矩阵
         self.R_meas = np.eye(2) * MEAS_STD_POS**2
-        
+
+    # ---------- Track 管理（由外部控制何时“加入候选轨迹”） ----------
+
     def _new_label(self) -> int:
         lab = self.next_label_id
         self.next_label_id += 1
         return lab
-    
-    def add_target(self, pos0: np.ndarray):
-            """
-            在当前时刻添加一个新目标（比如 A 在 t=0，B 在出现时）。
-            用pos0作为初始位置，速度设为0（由量测逐步修正）。
-            """
-            ext_state = ExtendedTargetState.init_from_position(pos0)
-            comp = BernoulliComponent(
-                label=self._new_label(),
-                r=0.9,
-                state=ext_state
-            )
-            self.state.components.append(comp)
-            
-    def add_target_with_state(self, x0: np.ndarray):
-        """
-        用完整真值状态初始化扩展目标：
-        x0 = [px, py, vx, vy]
-        """
-        # 这里直接用你给的 ExtendedTargetState 构造函数
-        P0 = np.diag([STATE_STD_POS**2, STATE_STD_POS**2,
-                      (5 * STATE_STD_VEL)**2, (5 * STATE_STD_VEL)**2])
-        S0 = np.array([[100**2, 0],
-                       [0, 50**2]], dtype=float)
-        ext_state = ExtendedTargetState(x=x0.copy(), P=P0, S=S0, gamma=10.0)
 
+    def add_target_with_state(self, x0: np.ndarray, r0: float = 0.8) -> None:
+        """
+        用完整真值状态初始化一个扩展目标：
+        x0 = [px, py, vx, vy]；
+        r0 < 1，之后由量测慢慢把 r 拉到接近 1。
+        """
+        ext_state = ExtendedTargetState.init_from_state(x0)
         comp = BernoulliComponent(
             label=self._new_label(),
-            r=0.9,
-            state=ext_state
+            r=r0,
+            state=ext_state,
         )
         self.state.components.append(comp)
-                
-    def initialize_from_truth(self, posA0: np.ndarray, posB0: np.ndarray):
+
+    def add_target_from_position(self, pos0: np.ndarray, r0: float = 0.7) -> None:
         """
-        用真值初始位置初始化两个扩展目标 A、B。
-        - posA0: 目标 A 初始位置 (2,)
-        - posB0: 目标 B 初始出现时的位置 (2,)
+        只有位置时的初始化（速度设为 0，由量测逐渐校正）。
+        动态仿真里可以用量测质心做这种初始化。
         """
-        self.state.components = []
-        self.next_label_id = 0
-
-        extA = ExtendedTargetState.init_from_position(posA0)
-        compA = BernoulliComponent(label=self._new_label(), r=0.9, state=extA)
-
-        extB = ExtendedTargetState.init_from_position(posB0)
-        compB = BernoulliComponent(label=self._new_label(), r=0.9, state=extB)
-
-        self.state.components = [compA, compB]
-        self.initialized = True
-        
-    def init_two_targets_from_measurements(self, meas_k):
-        """
-        已知场景中只有两个目标（A,B），
-        从第0帧量测中粗略初始化两个扩展目标 track。
-        简化起见：对所有非杂波点做聚类，取前两个簇作为 A/B。
-        """
-        from utils import cluster_extended_measurements
-        from data_gen import Measurement
-
-        non_clutter = [m for m in meas_k if not m.is_clutter]
-        # 聚类半径可以稍微小一点，比如 200m
-        clusters = cluster_extended_measurements(non_clutter, distance_thresh=200.0)
-
-        if len(clusters) == 0:
-            return
-
-        # 按簇大小排序，取前两个（如果只有一个就只建一个）
-        clusters.sort(key=lambda c: c.shape[0], reverse=True)
-        num_tracks = min(2, len(clusters))
-
-        for i in range(num_tracks):
-            pos_init = clusters[i].mean(axis=0)
-            ext_state = ExtendedTargetState.init_from_position(pos_init)
-            comp = BernoulliComponent(
-                label=self._new_label(),
-                r=0.9,
-                state=ext_state
-            )
-            self.state.components.append(comp)
-
-        self.initialized = True
-    # ---------- Track 管理 ----------
-
-    # def initialize_from_first_frame(self, meas_k: List[Measurement]):
-    #     """从第一帧量测初始化若干 track（简单：对非杂波量测聚类，每簇一个出生 Bernoulli）"""
-    #     non_clutter = [m for m in meas_k if not m.is_clutter]
-    #     clusters = cluster_extended_measurements(non_clutter, distance_thresh=200.0)
-
-    #     for cl in clusters:
-    #         pos_init = cl.mean(axis=0)
-    #         ext_state = ExtendedTargetState.init_from_position(pos_init)
-    #         comp = BernoulliComponent(
-    #             label=self._new_label(),
-    #             r=0.9,
-    #             state=ext_state
-    #         )
-    #         self.state.components.append(comp)
-    def init_one_target_from_measurements(self, meas_k):
-        """
-        用第 0 帧量测初始化一个 Bernoulli 目标（A）。
-        逻辑：取所有非杂波量测的质心作为初始位置，速度设 0。
-        """
-        # 只用非杂波量测
-        non_clutter = [m for m in meas_k if not m.is_clutter]
-        if len(non_clutter) == 0:
-            return
-
-        # 量测点坐标
-        zs = np.array([m.z for m in non_clutter], dtype=float)
-        pos0 = zs.mean(axis=0)              # 初始位置：点云质心
-
-        # 用你已有的扩展状态初始化接口
         ext_state = ExtendedTargetState.init_from_position(pos0)
-
-        # 建一个 BernoulliComponent
         comp = BernoulliComponent(
             label=self._new_label(),
-            r=0.9,
-            state=ext_state
+            r=r0,
+            state=ext_state,
         )
         self.state.components.append(comp)
-        self.initialized = True
-
-
-    def _new_label(self) -> int:
-        lab = self.next_label_id
-        self.next_label_id += 1
-        return lab
 
     # ---------- 滤波步骤 ----------
 
-    def predict(self):
-        """对所有 Bernoulli 做预测，并衰减存在概率"""
+    def predict(self) -> None:
+        """对所有 Bernoulli 做预测，并按生存概率轻微衰减 r。"""
         for comp in self.state.components:
             comp.state.predict()
-            # comp.r *= SURVIVAL_PROB
+            # 原始版本这里是关闭的，这里恢复一个温和的生存衰减
+            comp.r *= SURVIVAL_PROB
 
-    def update(self, meas_k: List[Measurement], t: float):
+    def _associate_measurements(
+        self, meas_k: List[Measurement]
+    ) -> (Dict[int, List[np.ndarray]], List[np.ndarray]):
+        """简单 gating + 最近邻分配，返回：
+        - assigned_measurements[i]: 分给第 i 个组件的量测列表；
+        - unassigned_measurements: 没被任何轨迹解释的量测（目前不再用于“出生”）。
         """
-        简化更新：
-        1. 收集所有非杂波量测；
-        2. 在 gate 内构造所有 (轨迹, 量测) 配对，按距离全局排序，贪心分配；
-           ——保证每个量测至多只被一个轨迹使用，避免 A 抢光所有量测；
-        3. 对每个 Bernoulli 根据点/扩展量测更新状态；
-        4. 未分配量测目前只记入 unassigned（题目中目标数已知，不再出生新目标）。
-        """
-        # 1) 过滤掉杂波量测（is_clutter = True 的不参与分配）
         non_clutter = [m for m in meas_k if not m.is_clutter]
-
-        # 为每个组件准备一个量测集合（扩展/点混合）
         assigned_measurements: Dict[int, List[np.ndarray]] = {
             i: [] for i in range(len(self.state.components))
         }
         unassigned_measurements: List[np.ndarray] = []
 
-        # 2) 构造“轨迹-量测”候选配对，并全局贪心分配
-        if len(non_clutter) > 0 and len(self.state.components) > 0:
-            candidate_pairs = []  # (dist, mi, ci)
-
-            for mi, m in enumerate(non_clutter):
-                z = m.z
-                # 计算该点到所有目标预测中心的距离
-                dists = []
-                for ci, comp in enumerate(self.state.components):
-                    pos_pred = comp.state.x[:2]
-                    dist = np.linalg.norm(z - pos_pred)
-                    if dist <= GATING_THRESHOLD:
-                        dists.append((dist, ci))
-
-                if len(dists) == 0:
-                    # 对所有目标都不在 gate 内，视为未分配 / 杂波
-                    unassigned_measurements.append(z)
-                    continue
-
-                # 按距离排序，找最近和次近
-                dists.sort(key=lambda x: x[0])
-                best_dist, best_ci = dists[0]
-                if len(dists) > 1:
-                    second_dist = dists[1][0]
-                else:
-                    second_dist = np.inf
-
-                # 如果这个点对最近目标的“优势”不够明显（距离差小于裕度），
-                # 认为是模糊点，不分配给任何目标，避免 A/B 抢同一团
-                if second_dist - best_dist < ASSIGN_DIST_MARGIN:
-                    unassigned_measurements.append(z)
-                    continue
-
-                # 否则才把这个点作为 (mi, best_ci) 的候选
-                candidate_pairs.append((best_dist, mi, best_ci))
-
-            # 然后再做一次全局贪心（其实现在每个点最多只出现一次）
-            candidate_pairs.sort(key=lambda x: x[0])
-            used_meas = set()
-
-            for dist, mi, ci in candidate_pairs:
-                if mi in used_meas:
-                    continue  # 这个量测已经被分配给别的轨迹
-                used_meas.add(mi)
-                z = non_clutter[mi].z
-                assigned_measurements[ci].append(z)
-
-            # 把那些在某些 gate 内但最终没被用的量测，也视作未分配（可选）
-            for mi, m in enumerate(non_clutter):
-                if mi not in used_meas:
-                    unassigned_measurements.append(m.z)
-        else:
-            # 没有非杂波量测或没有轨迹，所有量测都视为未分配
+        if len(non_clutter) == 0 or len(self.state.components) == 0:
             for m in non_clutter:
                 unassigned_measurements.append(m.z)
+            return assigned_measurements, unassigned_measurements
 
-        # 3) 对每个组件做更新
+        candidate_pairs = []  # (dist, mi, ci)
+        for mi, m in enumerate(non_clutter):
+            z = m.z
+            dists = []
+            for ci, comp in enumerate(self.state.components):
+                pos_pred = comp.state.x[:2]
+                dist = np.linalg.norm(z - pos_pred)
+                if dist <= GATING_THRESHOLD:
+                    dists.append((dist, ci))
+
+            if len(dists) == 0:
+                unassigned_measurements.append(z)
+                continue
+
+            dists.sort(key=lambda x: x[0])
+            best_dist, best_ci = dists[0]
+            second_dist = dists[1][0] if len(dists) > 1 else np.inf
+
+            if second_dist - best_dist < ASSIGN_DIST_MARGIN:
+                # 模糊量测，不分配给任何目标
+                unassigned_measurements.append(z)
+                continue
+
+            candidate_pairs.append((best_dist, mi, best_ci))
+
+        candidate_pairs.sort(key=lambda x: x[0])
+        used_meas = set()
+        for dist, mi, ci in candidate_pairs:
+            if mi in used_meas:
+                continue
+            used_meas.add(mi)
+            z = non_clutter[mi].z
+            assigned_measurements[ci].append(z)
+
+        for mi, m in enumerate(non_clutter):
+            if mi not in used_meas:
+                unassigned_measurements.append(m.z)
+
+        return assigned_measurements, unassigned_measurements
+
+    def update(self, meas_k: List[Measurement], t: float) -> None:
+        """根据当前帧量测对所有 Bernoulli 做一次更新，并调整 r。"""
+        assigned_measurements, _ = self._associate_measurements(meas_k)
+
         for idx, comp in enumerate(self.state.components):
-            Z = np.array(assigned_measurements[idx]) if len(assigned_measurements[idx]) > 0 else None
-            # 预测位置，用于判断是不是在干扰区
+            Z = (
+                np.array(assigned_measurements[idx])
+                if len(assigned_measurements[idx]) > 0
+                else None
+            )
             pos_pred = comp.state.x[:2]
+
             if Z is None:
-             # ====== 关键改动：区分“干扰导致的看不见” vs “普通漏检” ======
-                # if in_jam_region(pos_pred, t):
-                #     # 在干扰区且当前处于干扰时间：认为目标还在，只是被压制看不见
-                #     # 可以选择完全不衰减 r，或者只乘生存概率略微衰减
-                #     # 先保守一点：不动 r
-                #     pass
-                #     # 如果你想稍微衰减一点，可以改成：
-                #     # comp.r *= 0.995
-                # else:
-                #     # 正常漏检，再稍微衰减 r（比原来 0.99 更温和一点也可以）
-                #     comp.r *= 0.98
-                pass
+                # 没有量测命中该目标：
+                # - 在干扰区内：认为主要是被压制，只保留生存衰减；
+                # - 其他情况：额外轻微衰减 r，促使长时间漏检的目标最终“死亡”。
+                if in_jam_region(pos_pred, t):
+                    # 干扰区：只用生存衰减，不再额外打压 r
+                    pass
+                else:
+                    # 普通漏检：原始作业里用 0.9，这里保持不变
+                    comp.r *= 0.9
             else:
-                # 判断是点量测还是扩展量测：根据点数量粗判
+                # 有量测支撑：根据点/扩展量测更新，并适度提升 r
                 if Z.shape[0] == 1:
                     comp.state.update_with_point(Z[0], self.R_meas)
                 else:
                     comp.state.update_with_extended(Z, self.R_meas)
-                # 有量测支撑，存在概率向上拉
-                comp.r = min(0.99, comp.r + 0.05)
 
-        # 4) 不再对未分配量测触发新生（目标数已知为 2）
-        # for z in unassigned_measurements:
-        #     ...
+                comp.r = min(0.99, comp.r + 0.1)
 
-        # 5) 清理不存在的组件（存在概率过低）
         self._prune_components()
 
-    def _prune_components(self):
-    # 只删掉存在概率极低的组件，避免误删 A/B
-        # self.state.components = [
-        #     c for c in self.state.components if c.r > 0.01
-        # ]
-        if len(self.state.components) > 2:
-            self.state.components.sort(key=lambda c: c.r, reverse=True)
-            self.state.components = self.state.components[:2]
-        # 如果仍然超过2个（极端情况下），保留存在概率最高的两个
+    def _prune_components(self) -> None:
+        """
+        只删掉存在概率极低的组件，并限制最多 2 条轨迹：
+        - 作业场景中只显式添加 A、B，不在内部重建新 label；
+        - 因此这里只做“很小 r 的清理”和“最多保留 2 条轨迹”的保护。
+        """
+        self.state.components = [c for c in self.state.components if c.r > 0.01]
         if len(self.state.components) > 2:
             self.state.components.sort(key=lambda c: c.r, reverse=True)
             self.state.components = self.state.components[:2]
 
     # ---------- 上层接口 ----------
 
-    def step(self, meas_k, t:float):
-        """
-        单步：对已有目标做预测+更新。
-        （注意：A/B 的添加由外部 main 控制，不在这里自动出生）
-        """
-        # 如果当前还没有任何目标（极端情况），直接返回
-        if not self.initialized:
-            self.init_tracks(meas_k)
-            return
-
+    def step(self, meas_k: List[Measurement], t: float) -> None:
+        """单步递推：外部已经负责何时加入/删除候选轨迹，这里只做 r 的估计。"""
         self.predict()
-        self.update(meas_k,t)
+        self.update(meas_k, t)
 
     def get_current_estimates(self) -> Dict[Any, np.ndarray]:
-        """返回当前时刻各 track 的位置估计（只返回存在概率足够高的）"""
-        est = {}
+        """
+        返回当前时刻各 track 的位置估计：
+        - 只返回存在概率 r ≥ EXISTENCE_THRESHOLD 的组件；
+        - Cardinality = 这些组件的个数。
+        """
+        est: Dict[Any, np.ndarray] = {}
         for comp in self.state.components:
-            # if comp.r >= EXISTENCE_THRESHOLD:
+            if comp.r >= EXISTENCE_THRESHOLD:
                 est[comp.label] = comp.state.x[:2].copy()
         return est

@@ -159,22 +159,19 @@ def main(save_gif: bool = True, gif_name: str = "result.gif"):
             current_truth_states['B'] = posB
 
         # --- 跟踪器更新 ---
+        # 与 main 保持一致：A/B 作为“候选轨迹”由外部加入，存在概率 r 由滤波器自己估计。
         if frame == 0:
-            # ✅ 只初始化一个目标（A），不要用 init_two_targets
-            tracker.init_one_target_from_measurements(meas_k)  # 你可以自己封装这个
+            xA0 = trajA[0, :4]
+            tracker.add_target_with_state(xA0)
 
-        # 中途出现的 B（如果没 track 到，则强行加一个 Bernoulli）
-        if frame > 10 and len(tracker.state.components) < 2:
-            if 'B' in current_truth_states:
-                tracker.add_target(posB + np.random.randn(2) * 50.0)
+        # 中途出现的 B：在首次出现时加入候选轨迹（只加一次）
+        if (not np.isnan(trajB[frame, 0])) and all(
+            comp.label != 1 for comp in tracker.state.components
+        ):
+            xB0 = trajB[frame, :4]
+            tracker.add_target_with_state(xB0)
 
-        # 一步 LMB 递推
-        if hasattr(tracker, 'step'):
-            tracker.step(meas_k,t)
-        else:
-            tracker.predict()
-            tracker.update(meas_k)
-            tracker._prune_components()
+        tracker.step(meas_k, t)
 
         # --- 提取估计 ---
         estimates = []

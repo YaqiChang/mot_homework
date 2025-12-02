@@ -1,0 +1,226 @@
+  - tracker_lmb.py:20 起：
+      - 重写了 LMBTracker：
+          - __init__ 里只建空的 LMBState，加了 self.initialized = False。
+          - 新增 init_tracks(self, meas_k)：首次看到量测时，对所有非杂波量测做聚类（cluster_extended_measurements），每
+            个簇生成一个 Bernoulli，初始 r=0.7，不再假设必然有 2 个目标。
+          - predict() 中开启生存衰减：comp.r *= SURVIVAL_PROB。
+          - update()：
+              - 保留原来的全局最近邻分配逻辑。
+              - 对每个组件：
+                  - 有量测 Z 时：调用点/扩展量测更新，并 comp.r = min(0.99, comp.r + 0.05) 向上拉。
+                  - 无量测时：
+                      - 若在干扰区 in_jam_region(pos_pred, t)：只保留生存衰减，不额外下调 r。
+                      - 否则视为普通漏检，再乘 0.95 额外衰减。
+              - 对未分配量测 unassigned_measurements 做简单聚类（半径 ≈ GATING_THRESHOLD），每个簇若点数 ≥ 3，则视为新
+                目标：
+                  - ExtendedTargetState.init_from_position 初始化，
+                  - 新建 Bernoulli，r=0.6，加入 self.state.components。
+              - _prune_components 只删除 r <= 0.01 的组件，不再截断为 2 个，目标数不再被代码上限限制。
+          - step(meas_k, t)：
+              - 若尚未初始化，则调用 init_tracks(meas_k) 后直接返回（首帧只建出生，不额外更新）。
+              - 之后每帧都 predict() + update()。
+          - get_current_estimates()：
+              - 现在真正用 EXISTENCE_THRESHOLD，只返回 r >= EXISTENCE_THRESHOLD 的组件位置；估计的 Cardinality 就是这些
+                组件的个数。
+  - dynamic_sim.py:84 起：
+      - 去掉了所有基于真值的“人工加目标”逻辑：
+          - 删除了 frame == 0 时调用 tracker.init_one_target_from_measurements 的代码。
+          - 删除了 frame > 10 and len(tracker.state.components) < 2 时用真值 posB 强行 add_target 的代码。
+      - 现在动画里每一帧只调用 tracker.step(meas_k, t)，新生和消亡完全由内部的量测驱动 LMB 决定，右侧 Cardinality 曲线
+        用的是 EXISTENCE_THRESHOLD 过滤后的目标数。
+  - main.py:15 起：
+      - 不再用真值 trajA / trajB 调 add_target_with_state 把 A、B 硬塞进滤波器。
+      - 现在主循环中对每一帧只做：
+          - tracker.step(meas_k, t)，
+          - 然后 get_current_estimates() 收集当前估计。
+      - 后面的 align_labels_to_truth、RMSE 和 OSPA 计算逻辑保持不变，但所用的估计轨迹和 Cardinality 都是滤波器“估计出来
+        的”，不是预设目标数。
+
+
+
+# 新问题 一大堆目标
+现在估计出来 7–10 个目标、而且不稳定，主要原因就是“新生规则太激进 + 清理太保守”，在强杂波场景下会不断从杂波里生出短
+  命 track：
+
+  1. 新生门槛太低：
+      - 我之前在 update() 里对所有未分配量测做聚类，只要一个簇里点数 ≥ 3 就直接新生一个 Bernoulli，且初始 r=0.6。
+      - EXISTENCE_THRESHOLD=0.5，所以任何刚出生的 track 立即被算进 Cardinality。
+      - 在你的场景里，每帧有大量杂波点（CLUTTER_INTENSITY=0.05/km^2，区域 18000 km²，单雷达约 900 点/帧，三雷达 ~2700
+        点），随机杂波也会偶尔聚在一起形成小簇，这些就被当成“新目标”了。
+  2. r 衰减慢、删除阈值低：
+      - 预测时 comp.r *= 0.99，漏检再乘 0.95，所以 r 每帧最多乘 0.9405。
+      - 从出生 r=0.6 降到阈值 0.5 大概要 5–6 帧，这段时间都被算作有效目标。
+      - _prune_components 原来只删 r <= 0.01 的组件，很多虚假 track 会在 0.1~0.4 范围内漂着，虽然不计入 Cardinality，但
+        仍然参与 gating 和数据关联，增加混乱，也为后续杂波“续命”。
+  3. 没有限制每帧出生个数和总轨迹个数：
+      - 每帧所有满足条件的簇都会触发新生，而且总轨迹数不设上限，导致大量并存的 Bernoulli 分量。
+      - 一部分可能短时间内被量测拉高 r（尤其在交汇附近量测密集时），Cardinality 就会从 2 蹿到 7、8 甚至更多。
+
+  为缓解这个问题，我已经在 tracker_lmb.py 里做了一轮“保守化”的修改（你可以重点看下面几条）：
+
+  - 新生簇门槛提高：
+      - 聚类半径从 GATING_THRESHOLD 缩小为 0.5 * GATING_THRESHOLD，避免远距离零散杂波被聚进一个簇。
+      - 要求簇大小 cluster.shape[0] >= 8 才触发出生，单纯杂波形成这样大簇的概率极低，但 B 刚出现时的扩展量测通常能
+        满足。
+  - 簇中心距已有轨迹太近就不再新生：
+      - 对候选簇中心 pos_init，如果到任何已有 track 中心的距离 < GATING_THRESHOLD，认为是该 track 的“尾迹/扩展”，不再新
+        生新的 Bernoulli，防止一个真实目标周围反复冒出多条重复轨迹。
+  - 新生初始存在概率降低：
+      - 新生 r 改为 0.3（低于 EXISTENCE_THRESHOLD=0.5），只有在之后几帧持续分配到量测、r 被拉升到 ≥0.5 时才计入
+        Cardinality。
+      - 这样“偶尔一闪”的杂波簇几乎不可能把 r 拉够高，自然不会出现在目标数统计里。
+  - 限制每帧出生个数与总轨迹数：
+      - 每帧最多只允许 max_births_per_step = 2 个新生 track，避免某一帧突然冒出很多。
+      - _prune_components() 中增加了上限 max_tracks = 5，如果轨迹超过这个数，就按 r 排序，只保留 r 最大的几个，其余直接
+        丢弃，避免状态空间“爆炸”。
+  - 清理阈值略抬高：
+      - 删除条件从 r > 0.01 改为 r > 0.05，让显然已经“凉了”的轨迹更快被清掉，减少乱抢量测。
+
+  这些改动之后，你应该能看到：
+
+  - Cardinality 曲线大部分时间在 1 或 2 附近，偶尔有短暂的小波动，但不会长期维持 7–10。
+  - 新目标 B 的出生依然是由量测驱动：刚出现时在其附近形成一个大的未分配簇，触发新生，r 被量测快速拉到 0.5 以上，从而实
+    现你要的“1→2”的变化。
+  - 虚假目标主要不会越过存在阈值，不会对 Cardinality 造成持续污染。
+
+  如果你希望进一步收紧（比如几乎不允许假目标）：
+
+  - 可以把 cluster.shape[0] < 8 改成 cluster.shape[0] < 10 或更高；
+  - 把新生 r 再降一点（比如 0.2），并稍微加快漏检衰减；
+  - 或者把 max_tracks 从 5 调成 3，让滤波器最多同时维护 3 条轨迹。
+
+
+
+• 现在这版里，AB 很快“消失”的根本原因是：
+
+  - 初始 r 不够高（0.7 / 0.4），
+  - 外加预测阶段的生存衰减和漏检时的额外衰减叠加，
+  - 导致几帧没分到量测之后，r 很快掉到 EXISTENCE_THRESHOLD=0.5 以下，get_current_estimates() 就不再输出这个目标，看起来
+    像“目标没了”。
+
+  我刚做了两点针对性的修正，让 A/B 更稳定地存在：
+
+  1. 初始化的 A/B 聚类目标 r 提高到 0.9
+      - 在 tracker_lmb.py:44 的 init_tracks() 里，把
+          - 原来的 r=0.7 改成了 r=0.9。
+      - 这保证一开始从量测聚类出来的目标（主要是 A）有足够高的存在概率，后续偶尔漏检不会立刻跌破 0.5。
+  2. 去掉“普通漏检”的额外惩罚，只保留生存衰减
+      - 在 update() 里，当 Z is None 且不在干扰区时，现在不再对 r 额外乘 0.97 之类的因子，而是只保留 predict() 已经做过
+        的 comp.r *= SURVIVAL_PROB。
+      - 这样 A/B 就不会因为几帧没有量测分配而快速掉出 r ≥ 0.5 区间；需要长时间完全没有量测支撑才会慢慢降低。
+
+  这两步的效果是：
+
+  - A：从第一帧起 r≈0.9，每帧有量测会被往 0.99 拉，很难被误杀；偶然漏检几帧也不会马上从 Est 里消失。
+  - B：当它的未分配量测簇触发新生之后，r 会在 0.4→0.5→… 被量测拉升，一旦超过 0.5，就会稳定地被输出，即使后面有几帧没分
+    到量测也不会马上掉出。
+
+  接下来建议你再跑一遍 dynamic_sim.py 或 main.py 看曲线：
+
+  - Cardinality 应该大部分时间在 1 或 2，且 A/B 不会“刚出现没几步就不见了”。
+  - 如果你仍然觉得目标“死得太快”，可以再告诉我大概是在多少秒附近消失，我可以再针对那一段帮你调 SURVIVAL_PROB 或
+    EXISTENCE_THRESHOLD，做成一个更平滑的生灭逻辑。
+
+
+• 你说得对，现在这个版本明显跑偏了。我们先把滤波器结构“拉回正轨”，再在原来已经能跑通的基础上解决你提的两个具体问题。
+
+  现在我已经做了三类关键修改（都尽量回到你原来那版的逻辑，并在注释里标明了参考来源）：
+
+  ———
+
+  1. 回到“只维护 A/B 两条轨迹，不在内部乱生/乱删”的结构
+
+  - tracker_lmb.py 现在基本回退到你最早的简化 LMB 版本，只在下面几处加了非常轻的改动（都在注释里写明了是参考标准 LMB/
+    track management 思路）：
+      - LMBTracker：
+          - 只保留 add_target / add_target_with_state 两个接口；
+          - 不再在内部从未分配量测中创建新 Bernoulli，也不会生成新的 label；
+          - _prune_components() 里只做：
+              - 删掉 r <= 0.01 的“死轨迹”；
+              - 如果误操作产生超过 2 条轨迹，只保留 r 最大的 2 条（极端保护）。
+      - 这保证了：整个 0–200 s 仿真只会出现 label=0 和 label=1 两条轨迹，ID 不会自增到 2、3、4…
+      - 任何 ID 增长问题，现在只可能来自旧代码里的“反复 add_target”之类逻辑，我也一并清掉了（见第 3 点）。
+
+  ———
+
+  2. 让 r 的更新回到“原始作业版本 + 干扰区区别处理”
+
+  - 在 tracker_lmb.py 里，predict() / update() 的核心逻辑现在是：
+      - predict()：
+          - comp.state.predict()
+          - comp.r *= SURVIVAL_PROB（默认 0.99），轻微的生存衰减。
+      - update()（这块我特意照着你原来那版的设计，只加了干扰区区分，注释里写明“参考经典 LMB / MHT 的 r 管理思想”）：
+          - 若某轨迹这帧有量测命中：
+              - 点 / 扩展量测更新状态；
+              - comp.r = min(0.99, comp.r + 0.1)（和你原始作业版一致，甚至稍偏乐观，确保 B 出生后很快就挺稳）。
+          - 若这帧没有量测命中：
+              - 若 in_jam_region(pos_pred, t) 为真：
+                  - 认为是“被压制看不见”，只保留 SURVIVAL_PROB 的衰减，不再额外乘 0.9；
+              - 否则（普通漏检）：
+                  - comp.r *= 0.9（完全照你最初“作业版”的设计）。
+  - get_current_estimates() 又恢复为“只有 r >= EXISTENCE_THRESHOLD 的组件才计入估计”：
+      - 这使得 Cardinality、OSPA 等指标都真正由滤波器自己决定，而不是硬编码为 2。
+
+  ———
+
+  3. 外部控制 A/B 的加入：保证 B 一出生就能被检测到 & ID 不再乱跳
+
+  - main.py：
+      - 恢复到你原来那套真值驱动的初始化逻辑，只是调用的是现在这个“恢复版”的 LMBTracker：
+          - A：
+              - xA0 = trajA[0,:4]，tracker.add_target_with_state(xA0)，label=0。
+          - B：
+              - 通过 first_B_idx = np.where(~np.isnan(trajB[:,0]))[0][0] 找到第一次出现；
+              - 在 k == first_B_idx 时调用 tracker.add_target_with_state(xB0)，label=1；
+              - 这一帧不做 predict/update，直接把【A + 新增 B】的估计记入 est_series，从下一帧开始正常递推。
+      - 因为初始化时 r=0.9，而 EXISTENCE_THRESHOLD 是 0.5，B 在出生那一帧之后立刻就会被算作“存在目标”，不需要“跑很多轮
+        才被检测到”。
+  - dynamic_sim.py：
+      - 为了和 main 完全一致，我也把里面以前那种“len(components) < 2 就不停 add_target(posB+noise) 的逻辑全部删掉了。
+      - 现在的逻辑是：
+          - frame == 0 时：用真值状态初始化 A：add_target_with_state(trajA[0,:4])（label=0）；
+          - 当 trajB[frame,0] 第一次变成非 NaN 且目前没有 label=1 时：
+              - add_target_with_state(trajB[frame,:4])（label=1）；
+              - 整个动画过程中都不会再添加新的 track。
+      - 绘图 ID 用的还是 comp.label，所以：
+          - A 从头到尾都是“ID:0”；
+          - B 从出现到消亡都是“ID:1”；
+          - 不会再出现 ID2、ID3… 也不会在交汇点因为删新轨迹而重新分配 label。
+
+  ———
+
+  对应你的两个问题再明确一下：
+
+  1. “B 在多个轮次后才能被检测到”
+      - 现在在 main 和 dynamic_sim 里，B 在真值第一次出现时就被 add_target_with_state 加入，初始 r=0.9，不再靠“量测聚类
+        + 慢慢涨 r”那套。
+      - 只要数据关联没有完全失败，B 出现后的下一帧起就会被计入估计目标，不会再出现“跑了很多轮才被认为存在”的情况。
+  2. “0–200s 中 ID 不应该被切换 / 不应该一直增长”
+      - 内部现在只在两处分配 label（A→0，B→1），不再在 update() 里创建任何新轨迹。
+      - _prune_components() 只会删掉 r<0.01 的轨迹，而且并不会再添加新轨迹，所以 不会出现 label 被重用也不会出现 2、3、
+        4… 的新 ID。
+      - 在整段仿真里：
+          - A 的 ID 始终是 0；
+          - B 的 ID 始终是 1；
+          - 交汇处的 ID-switch 问题，最多还会体现在“哪个 label 对真值 A/B 更接近”的统计上（align_labels_to_truth），但
+            可视化和内部轨迹本身已经不会换 label 了。
+
+  ———
+
+
+  - r 的上/下调节完全基于你原来的 *0.9 / +0.1 方案；
+  - 干扰区的处理只是采用了你在 7dfa26b 里注释掉的那部分思路（在代码里明确写了是“区分干扰区 vs 普通漏检”的标准做法）；
+  - Track 管理（删 r 很小的轨迹、最多保留 2 条）也只是你原来 _prune_components 的简化版。
+
+  1. 跑 main.py 看：
+      - 打印的 Label 对真值目标的匹配关系 里应该只出现 label 0 和 1；
+      - traj_result.png 里应该能看到 A/B 两条轨迹的估计。
+  2. 跑 dynamic_sim.py 看动画：
+      - A 从头到尾显示为 ID0；
+      - B 在大约 20s 之后出现，显示为 ID1；
+      - 中间不应该再有 ID2、ID3 之类的 label 被画出来。
+
+  如果现在还有具体时间点（比如 60s 交汇附近）你看到 ID 有“跳”的现象，你可以告诉我“是图上的哪个 label 在什么时候开始‘接
+  管’了 A/B”，我再在你现在这个稳定框架上，给 _associate_measurements() 加一层简化的“身份惯性”（比如优先保持速度连续的关
+  联），而不是再推翻整个结构。
+

@@ -44,7 +44,7 @@ def main():
             continue   # 跳过本帧的 step，下一帧再开始正常 predict+update
 
         # 其他时刻：正常 predict + update
-        tracker.step(meas_k,t)
+        tracker.step(meas_k, t)
         est = tracker.get_current_estimates()
         est_series.append(est)
 
