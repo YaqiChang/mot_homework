@@ -20,22 +20,8 @@ project_root/
 - [ ] 可以AI解读代码关键部分，制作PPT
 修改代码相关的内容加在对应的py文件里面。没用什么包，就matplotlib和numpy
 
- # 比起初始调整内容说明
-调整内容：
-
-  - config.py：将杂波强度降到 0.05/km²（原值在 60km×40km 区域下会生成 ~1.2 万点/
-    帧导致图面被杂波淹没），保持“强杂波”但可计算；gating 半径放宽到 500m，分配的
-    优势裕度降到 50m，避免交汇时真量测被判模糊。
-  - tracker_lmb.py：去掉更新阶段重复的贪心分配循环，保留一次全局最近邻分配，确保
-    量测不被重复或丢弃。
-
-  验证结果（运行 python main.py）：
-
-  - Label 对齐：{0: 'A', 1: 'B'}
-  - RMSE A: 65.93 m，RMSE B: 42.61 m
-  - Mean OSPA: 34.15 m
-  - 生成的 traj_result.png、meas_step60.png 已更新，单帧点云不再被杂波刷屏。
-
+# 修改说明和分析说明
+见[修改说明](修改说明.md)，[结果分析说明](结果分析说明.md)
 
 # 混淆矩阵分析
 传统混淆矩阵用于分类任务，而在多目标跟踪任务中，“混淆” 是指：
@@ -93,3 +79,4 @@ Clutter	FP_→A	FP_→B	—
       - False targets inside jamming area
   - confusion_matrix.png 仍然是 2×3 热力图（True A/B × Pred A/B/None），用来配合
     这些数字做直观分析。
+

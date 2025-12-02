@@ -1,5 +1,11 @@
 # plot.py
 import matplotlib
+from matplotlib import font_manager
+font_manager.fontManager.addfont("./fonts/SimHei.ttf")
+matplotlib.rcParams["font.sans-serif"] = ["SimHei"]
+matplotlib.rcParams["axes.unicode_minus"] = False
+
+from config import RADARS, JAM_START_T, JAM_END_T, KM
 matplotlib.use("Agg")  # 避免 Qt xcb 问题，只出图片文件
 import matplotlib.pyplot as plt
 import numpy as np
@@ -390,6 +396,109 @@ def plot_detection_recall(
 
     if save_path is not None:
         plt.savefig(save_path, dpi=150, bbox_inches="tight")
+    if show:
+        plt.show()
+    plt.close(fig)
+    
+def plot_radar_detection_over_time(
+    times: np.ndarray,
+    all_measurements: List[List[Measurement]],
+    save_path: str = "radar_detection_over_time.png",
+    show: bool = False,
+) -> None:
+    """
+    绘制：每个雷达在每一帧的“有效目标量测”数量随时间变化曲线。
+    - 有效目标量测：is_clutter == False 的量测（A/B 真目标的点或扩展点）
+    - 通过在图中标出 [JAM_START_T, JAM_END_T]，可以直观体现 R2 在干扰期间“看不到目标”。
+
+    本图使用三个子图分别展示 R1/R2/R3，便于比较。
+    """
+    radar_ids = sorted(RADARS.keys())
+    T = len(times)
+
+    # counts[radar_id] -> (T,) 每帧有效量测数量
+    counts = {rid: np.zeros(T, dtype=int) for rid in radar_ids}
+
+    for k, meas_k in enumerate(all_measurements):
+        for m in meas_k:
+            # 只统计真目标量测（A/B），忽略杂波
+            if m.is_clutter:
+                continue
+            if m.radar_id in counts:
+                counts[m.radar_id][k] += 1
+
+    fig, axes = plt.subplots(len(radar_ids), 1, figsize=(8, 8), sharex=True)
+
+    for idx, rid in enumerate(radar_ids):
+        ax = axes[idx]
+        ax.plot(times, counts[rid], label=f"{rid} 有效量测数")
+
+        # 仅在 R2 子图上标出压制干扰时间窗
+        if rid == "R2":
+            ax.axvspan(
+                JAM_START_T,
+                JAM_END_T,
+                color="red",
+                alpha=0.15,
+                label="R2 压制干扰时间窗",
+            )
+
+        ax.set_ylabel("有效量测数")
+        ax.grid(True, linestyle="--", alpha=0.4)
+        ax.legend(loc="upper right", fontsize=9)
+
+    axes[-1].set_xlabel("Time (s)")
+    fig.suptitle("各雷达随时间的有效目标量测数量", fontsize=14)
+
+    plt.tight_layout(rect=[0, 0.03, 1, 0.96])
+    plt.savefig(save_path, dpi=200)
+    if show:
+        plt.show()
+    plt.close(fig)
+
+
+def plot_radar_distance_over_time(
+    times: np.ndarray,
+    trajA_true: np.ndarray,
+    trajB_true: Optional[np.ndarray] = None,
+    save_path: str = "radar_distance_over_time.png",
+    show: bool = False,
+) -> None:
+    """
+    绘制：各雷达到最近目标（A/B）的距离随时间变化曲线，用于辅助判断
+    点目标 / 扩展目标（50km 阈值）。
+
+    - 当距离 > 50km 时，对应的是点目标量测（每帧 1 个）
+    - 当距离 < 50km 时，对应的是扩展目标量测（每帧 8~15 个）
+    """
+    radar_ids = sorted(RADARS.keys())
+    T = len(times)
+
+    dists_km = {rid: np.zeros(T, dtype=float) for rid in radar_ids}
+
+    for rid in radar_ids:
+        radar_pos = RADARS[rid]
+        for k in range(T):
+            candidates = [np.linalg.norm(trajA_true[k] - radar_pos)]
+            if trajB_true is not None and not np.isnan(trajB_true[k, 0]):
+                candidates.append(np.linalg.norm(trajB_true[k] - radar_pos))
+            dists_km[rid][k] = min(candidates) / KM  # m -> km
+
+    fig, axes = plt.subplots(len(radar_ids), 1, figsize=(8, 8), sharex=True)
+
+    for idx, rid in enumerate(radar_ids):
+        ax = axes[idx]
+        ax.plot(times, dists_km[rid], label=f"{rid}–最近目标距离")
+        ax.axhline(50, color="black", linestyle=":", label="50km 阈值")
+        ax.set_ylabel("距离 (km)")
+        ax.grid(True, linestyle="--", alpha=0.4)
+        ax.legend(loc="upper right", fontsize=9)
+
+    axes[-1].set_xlabel("Time (s)")
+    fig.suptitle("各雷达到最近目标的距离随时间变化", fontsize=14)
+
+    plt.tight_layout(rect=[0, 0.03, 1, 0.96])
+    plt.savefig(save_path, dpi=200)
     if show:
         plt.show()
     plt.close(fig)

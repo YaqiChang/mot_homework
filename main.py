@@ -2,11 +2,9 @@
 import numpy as np
 
 from config import DT, N_STEPS
-from data_gen import generate_target_trajectories, simulate_measurements, in_jam_region
+from data_gen import generate_target_trajectories, in_jam_region, simulate_measurements
 from tracker_lmb import LMBTracker
 from metrics import *
-
-# 新增：可选绘图开关
 ENABLE_PLOT = True
 
 # 如果需要绘图，再导入 plot 模块
@@ -18,6 +16,8 @@ if ENABLE_PLOT:
         plot_id_timeline,
         plot_detection_recall,
         plot_confusion_matrix,
+        plot_radar_detection_over_time,
+        plot_radar_distance_over_time,
     )
 
 def main():
@@ -265,6 +265,23 @@ def main():
                 save_path="results/meas_step60.png",
                 show=False
             )
+
+        # 各雷达量测效果随时间变化（分 R1/R2/R3 子图）
+        plot_radar_detection_over_time(
+            times=times,
+            all_measurements=measurements,
+            save_path="results/radar_detection_over_time.png",
+            show=False
+        )
+
+        # 各雷达到最近目标的距离随时间变化（辅助理解点/扩展目标切换）
+        plot_radar_distance_over_time(
+            times=times,
+            trajA_true=trajA[:, :2],
+            trajB_true=trajB[:, :2],
+            save_path="results/radar_distance_over_time.png",
+            show=False,
+        )
 
 
 if __name__ == "__main__":

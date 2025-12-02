@@ -54,8 +54,8 @@ JAM_REGION_CENTER = np.array([(F_POS[0] + R1_X) / 2.0, 0.0])
 JAM_REGION_RADIUS = 2.5 * KM
 
 # 时间你可以保留原来的
-JAM_START_T = 40.0    # 举例
-JAM_END_T   = 80.0
+JAM_START_T = 130.0    # 举例   40 80
+JAM_END_T   = 150.0
 
 
 # --------- 杂波 ----------

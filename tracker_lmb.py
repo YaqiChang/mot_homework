@@ -22,7 +22,7 @@ from config import (
     SURVIVAL_PROB, BIRTH_PROB,
     EXISTENCE_THRESHOLD, POINT_EXT_THRESHOLD
 )
-from data_gen import Measurement, in_jam_region
+from data_gen import Measurement
 from models import (
     ExtendedTargetState, BernoulliComponent, LMBState
 )
@@ -271,15 +271,11 @@ class LMBTracker:
             for ci, comp in enumerate(comps):
                 Z_list = assign[ci]
                 if len(Z_list) == 0:
-                    # 该轨迹在该假设中本帧漏检
-                    pos_pred = comp.state.x[:2]
-                    if in_jam_region(pos_pred, t):
-                        # 干扰区：仅保留 predict 阶段的生存概率，不额外乘 (1 - P_D)
-                        # comp.r 已在 predict() 中乘过 SURVIVAL_PROB
-                        pass
-                    else:
-                        # 普通区域：再乘一次 (1 - P_D)，表示这帧“应该看见但没看见”
-                        comp.r *= (1.0 - self.P_D)
+                    # 该轨迹在该假设中本帧漏检：
+                    # 这里不再按“干扰区域”特殊处理，而是统一视为
+                    # 传感器层面的漏检（R2 的压制干扰已在 data_gen 中针对
+                    # R2 的量测生成体现，不再在 track 层面按区域区分）。
+                    comp.r *= (1.0 - self.P_D)
                 else:
                     # 该轨迹在该假设下获得了 1~k 个量测（扩展目标）
                     Z = np.array(Z_list)
