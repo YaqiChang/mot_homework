@@ -133,10 +133,10 @@ def main(save_gif: bool = True, gif_name: str = None):
         ax.plot(pos_km[0], pos_km[1], "r^", markersize=8)
 
         # 雷达坐标标注：
-        # - R1 按题意用符号形式 24√3
+        # - R1 按题意用符号形式 25√3
         # - 其他雷达继续用数值坐标
         if rid == "R1":
-            label_text = "R1\n(24√3, 0) km"
+            label_text = "R1\n(25√3, 0) km"
         else:
             label_text = f"{rid}\n({pos_km[0]:.1f}, {pos_km[1]:.1f}) km"
 
