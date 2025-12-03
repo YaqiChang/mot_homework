@@ -64,21 +64,21 @@ def main(save_gif: bool = True, gif_name: str = None):
     y_min_km = CLUTTER_REGION_Y[0] / KM
     y_max_km = CLUTTER_REGION_Y[1] / KM
 
-    # 画布与坐标轴
-    fig, ax = plt.subplots(figsize=(10, 10))
+    # 画布与坐标轴（略宽的长方形，便于放文字）
+    fig, ax = plt.subplots(figsize=(14, 9))
     ax.set_facecolor("white")
 
     # 按配置覆盖整个杂波区域（与 config 中 CLUTTER_REGION_X/Y 对齐）
     ax.set_xlim(x_min_km, x_max_km)
     ax.set_ylim(y_min_km, y_max_km)
 
-    # 坐标刻度字号放大
-    ax.tick_params(labelsize=20)
+    # 坐标刻度字号适当放大（避免过大拥挤）
+    ax.tick_params(labelsize=12)
 
     # ---- 坐标系标注（全局直角坐标系，与 config 一致）----
-    ax.set_xlabel("X (km)", fontsize=28)
-    ax.set_ylabel("Y (km)", fontsize=28)
-    ax.set_title("Scenario Simulation with Global Cartesian Coordinates", fontsize=32)
+    ax.set_xlabel("X (km)", fontsize=18)
+    ax.set_ylabel("Y (km)", fontsize=18)
+    ax.set_title("Scenario Simulation with Global Cartesian Coordinates", fontsize=22)
     ax.grid(True, linestyle="--", alpha=0.4)
 
     # 原点与坐标轴方向箭头（坐标轴覆盖整个可视区域）
@@ -97,7 +97,7 @@ def main(save_gif: bool = True, gif_name: str = None):
         "X 轴",
         ha="right",
         va="bottom",
-        fontsize=28,
+        fontsize=18,
     )
 
     # Y 轴：从下到上贯穿整个图，并在顶端加箭头
@@ -113,7 +113,7 @@ def main(save_gif: bool = True, gif_name: str = None):
         "Y 轴",
         ha="left",
         va="top",
-        fontsize=28,
+        fontsize=18,
     )
 
     # 原点标注
@@ -122,7 +122,7 @@ def main(save_gif: bool = True, gif_name: str = None):
         origin[0] + 2.0,
         origin[1] + 2.0,
         "O (0, 0)",
-        fontsize=28,
+        fontsize=18,
     )
 
     # ---- 场景静态元素：雷达、交汇点 F、干扰区、杂波区域 ----
@@ -133,10 +133,10 @@ def main(save_gif: bool = True, gif_name: str = None):
         ax.plot(pos_km[0], pos_km[1], "r^", markersize=8)
 
         # 雷达坐标标注：
-        # - R1 按题意用符号形式 25√3
+        # - R1 按题意用符号形式 24√3
         # - 其他雷达继续用数值坐标
         if rid == "R1":
-            label_text = "R1\n(25√3, 0) km"
+            label_text = "R1\n(24√3, 0) km"
         else:
             label_text = f"{rid}\n({pos_km[0]:.1f}, {pos_km[1]:.1f}) km"
 
@@ -145,7 +145,7 @@ def main(save_gif: bool = True, gif_name: str = None):
             pos_km[1] - 3.0,
             label_text,
             color="red",
-            fontsize=28,
+            fontsize=18,
             ha="center",
         )
 
@@ -178,7 +178,7 @@ def main(save_gif: bool = True, gif_name: str = None):
             mid[1] + 2.0,
             "50 km",
             color="black",
-            fontsize=28,
+            fontsize=18,
             ha="center",
             va="bottom",
         )
@@ -189,7 +189,7 @@ def main(save_gif: bool = True, gif_name: str = None):
             r2_km[1] - 5.0,
             "∠OR2R1 = 60°",
             color="black",
-            fontsize=28,
+            fontsize=18,
             ha="left",
             va="top",
         )
@@ -214,7 +214,7 @@ def main(save_gif: bool = True, gif_name: str = None):
         F_km[1] + 2.0,
         "F 点",
         color="blue",
-        fontsize=28,
+        fontsize=18,
     )
 
     # 干扰区域（按照 config：中心 JAM_REGION_CENTER，半边长 JAM_REGION_RADIUS 的正方形）
@@ -241,7 +241,7 @@ def main(save_gif: bool = True, gif_name: str = None):
         JAM_REGION_CENTER[1] / KM,
         "干扰区\n(Jamming)",
         color="black",
-        fontsize=28,
+        fontsize=18,
         ha="center",
         va="center",
     )
@@ -262,7 +262,7 @@ def main(save_gif: bool = True, gif_name: str = None):
         CLUTTER_REGION_Y[1] / KM - 5.0,
         "杂波区域",
         color="gray",
-        fontsize=28,
+        fontsize=18,
     )
 
     # A/B 起点标注（A_start / B_start）
@@ -275,7 +275,7 @@ def main(save_gif: bool = True, gif_name: str = None):
             A_start_km[1] + 2.0,
             f"A_start\n({A_start_km[0]:.1f}, {A_start_km[1]:.1f}) km",
             color="c",
-            fontsize=28,
+            fontsize=18,
         )
 
     # B 起点为 trajB 第一帧非 NaN 位置
@@ -289,7 +289,7 @@ def main(save_gif: bool = True, gif_name: str = None):
             B_start_km[1] + 2.0,
             f"B_start\n({B_start_km[0]:.1f}, {B_start_km[1]:.1f}) km",
             color="darkorange",
-            fontsize=28,
+            fontsize=18,
         )
 
     # ---- 理论轨迹方程（F(x,y)=0）对应的曲线示意 ----
@@ -342,9 +342,9 @@ def main(save_gif: bool = True, gif_name: str = None):
         )
 
     # 在右下角用半透明框标注三个轨迹方程，颜色与上面虚线一致
-    eq_x = 0.98
-    eq_y = 0.05
-    line_dy = 0.05
+    eq_x = 0.97
+    eq_y = 0.03
+    line_dy = 0.045
     box_props = dict(
         boxstyle="round,pad=0.4",
         facecolor="white",
@@ -359,7 +359,7 @@ def main(save_gif: bool = True, gif_name: str = None):
         r"$F_A(x,y)=y=0$",
         transform=ax.transAxes,
         color="blue",
-        fontsize=24,
+        fontsize=16,
         ha="right",
         va="bottom",
         bbox=box_props,
@@ -372,7 +372,7 @@ def main(save_gif: bool = True, gif_name: str = None):
         r"$F_{B1}(x,y)=(5\sqrt{3}+1)y-2.5(x-25)=0$",
         transform=ax.transAxes,
         color="purple",
-        fontsize=24,
+        fontsize=16,
         ha="right",
         va="bottom",
         bbox=dict(facecolor="none", edgecolor="none"),
@@ -385,7 +385,7 @@ def main(save_gif: bool = True, gif_name: str = None):
         r"$F_{B2}(x,y)=y+20\frac{\ln 5-\ln\left(1+\frac{4x}{25}\right)}{\ln 5}=0$",
         transform=ax.transAxes,
         color="green",
-        fontsize=24,
+        fontsize=16,
         ha="right",
         va="bottom",
         bbox=dict(facecolor="none", edgecolor="none"),
@@ -405,11 +405,11 @@ def main(save_gif: bool = True, gif_name: str = None):
         "",
         transform=ax.transAxes,
         color="red",
-        fontsize=32,
+        fontsize=20,
         fontweight="bold",
     )
 
-    ax.legend(loc="upper right", fontsize=24)
+    ax.legend(loc="upper right", fontsize=16)
 
     def update(frame: int):
         t = times[frame]
@@ -439,7 +439,7 @@ def main(save_gif: bool = True, gif_name: str = None):
 
         # 干扰区提示
         if not np.isnan(trajA[frame, 0]) and in_jam_region(trajA[frame, :2], t):
-            jam_text.set_text(f"t = {t:.1f}s：A 目标处于干扰区内")
+            jam_text.set_text(f"t = {t:.1f}s：目标处于干扰区内")
         else:
             jam_text.set_text(f"t = {t:.1f}s")
 
