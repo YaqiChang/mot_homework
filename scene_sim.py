@@ -6,6 +6,7 @@ scene_sim.py
 - 在图上清晰标出全局直角坐标系（按 config 中的设置）
 """
 
+import os
 import matplotlib
 import matplotlib.pyplot as plt
 from matplotlib import font_manager, rcParams
@@ -43,7 +44,7 @@ except Exception:
     pass
 
 
-def main(save_gif: bool = False, gif_name: str = "scene.gif"):
+def main(save_gif: bool = True, gif_name: str = None):
     """
     场景还原仿真入口：
     只演示 A/B 的真值轨迹与场景元素，用于说明：
@@ -313,9 +314,21 @@ def main(save_gif: bool = False, gif_name: str = "scene.gif"):
     ani = FuncAnimation(fig, update, frames=range(N_STEPS), interval=50, blit=False)
 
     if save_gif:
+        # 默认保存到 results/ 目录下
+        if gif_name is None:
+            os.makedirs("results", exist_ok=True)
+            gif_path = os.path.join("results", "scene.gif")
+        else:
+            # 如果用户传了完整路径，就按传入的来；否则仍然放到 results 下
+            if os.path.dirname(gif_name):
+                gif_path = gif_name
+            else:
+                os.makedirs("results", exist_ok=True)
+                gif_path = os.path.join("results", gif_name)
+
         print("[scene_sim] 正在生成场景 GIF，请稍等...")
-        ani.save(gif_name, writer="pillow", fps=10)
-        print(f"[scene_sim] GIF 已保存为 {gif_name}")
+        ani.save(gif_path, writer="pillow", fps=10)
+        print(f"[scene_sim] GIF 已保存为 {gif_path}")
 
     plt.tight_layout()
     plt.show()
